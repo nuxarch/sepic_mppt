@@ -1,9 +1,14 @@
+#pragma once
 #ifndef SEPIC_H
 #define SEPIC_H
 
 #include "sepic_hardware_def.h"
 #include "SimpleFOC.h"
 // uint16_t tick = 0;
+extern TaskHandle_t vMainTaskHandle;
+extern TaskHandle_t vPIDTaskHandle;
+extern TaskHandle_t vStairSetpointTaskHandle;
+extern QueueHandle_t QueueVout;
 
 void initCmd();
 void duty(char *str);

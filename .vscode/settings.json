@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "random": "cpp",
+        "system_error": "cpp",
+        "pinconfigured.h": "c"
+    }
+}

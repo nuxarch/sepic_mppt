@@ -20,6 +20,6 @@
 #define VIN_MAX 25
 #define VIN_MIN 8
 #define IIN_MAX 5
-#define VOUT_MAX 50
+#define VOUT_MAX 100
 #define VOUT_MIN 0
 #endif // SEPIC_HARDWARE_DEF_H

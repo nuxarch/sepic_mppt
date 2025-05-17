@@ -5,6 +5,12 @@
 #include "stm32f405xx.h"
 #include "SimpleFOC.h"
 
+TaskHandle_t vMainTaskHandle;
+TaskHandle_t vPIDTaskHandle;
+TaskHandle_t vStairSetpointTaskHandle;
+QueueHandle_t QueueVout;
+QueueHandle_t QueueSetpoint;
+
 TIM_TypeDef *pwmTimer;
 HardwareTimer *sepicPWM;
 uint32_t channel;
@@ -171,9 +177,11 @@ void vMainTask(void *pvParameters)
     setSpeed(100000);
     initADC();
     initCmd();
+    Serial.println(F("Main Sepic Task Started"));
 
     while (1)
     {
+        // Serial.println(F("Main Sepic Task looped"));
 
         int32_t VRef = readVref();
         // Serial.print(F(">VIN:"));
@@ -190,7 +198,7 @@ void vMainTask(void *pvParameters)
         {
             sepicSafety.isBoardOverTemperature = true;
         }
-        else if (sepicData.boardTemperature < TEMP_MIN)
+        else if (sepicData.boardTemperature < TEMP_MAX)
         {
             sepicSafety.isBoardOverTemperature = false;
         }
@@ -232,6 +240,10 @@ void vMainTask(void *pvParameters)
         // ======== reading voltage output ========
         int32_t Vout = readVoltage(VRef, VOUT_PIN);
         sepicData.voltageOutput = map(Vout, 0, VRef, 0, 100);
+        if (xQueueSend(QueueVout, &sepicData.voltageOutput, portMAX_DELAY) == pdPASS)
+        {
+            // Serial.print("Sent value");
+        }
         // sepicData.voltageOutput = filterVout(sepicData.voltageOutput);
         if (sepicData.voltageOutput > VOUT_MAX)
         {
@@ -271,10 +283,36 @@ void vMainTask(void *pvParameters)
                 Serial.print(sepicData.voltageOutput);
             }
             Serial.println();
+            // setDuty(0);
+            if (vPIDTaskHandle != NULL)
+            {
+                vTaskSuspend(vPIDTaskHandle);
+                vTaskSuspend(vStairSetpointTaskHandle);
+                vTaskDelay(100);
+                // vTaskDelete(vPIDTaskHandle);
+            }
+            // if (vMainTaskHandle != NULL)
+            // {
+            //     vTaskSuspend(vMainTaskHandle);
+            // }
+            // if (vStairSetpointTaskHandle != NULL)
+            // {
+            //     vTaskSuspend(vStairSetpointTaskHandle);
+            // }
         }
+        else
+        {
+            if (eTaskGetState(vPIDTaskHandle) == eSuspended)
+            {
+                vTaskResume(vPIDTaskHandle);
+                vTaskResume(vStairSetpointTaskHandle);
+                vTaskDelay(100);
+            }
+        }
+        // Serial.println(F("Main Sepic Task looped"));
         command.run();
 
-        vTaskDelay(50);
+        vTaskDelay(5);
     }
 }
 void vPlottingTask(void *pvParameters)
@@ -286,18 +324,18 @@ void vPlottingTask(void *pvParameters)
     {
         int32_t VRef = readVref();
 
-        // Serial.print(F(">VSumber:"));
-        // Serial.print(sepicData.voltageInput);
-        // Serial.print(F(",VOUT_Terbaca:"));
-        // Serial.print(sepicData.voltageOutput);
-        // Serial.print(F(",BoardTemperature:"));
-        // Serial.print(sepicData.boardTemperature);
+        Serial.print(F(">VSumber:"));
+        Serial.print(sepicData.voltageInput);
+        Serial.print(F(",VOUT_Terbaca:"));
+        Serial.print(sepicData.voltageOutput);
+        Serial.print(F(",BoardTemperature:"));
+        Serial.print(sepicData.boardTemperature);
         Serial.print(F(">IIN_Terbaca:"));
         Serial.print(sepicData.currentInput);
         Serial.print(F(",SetDutyCycle:"));
         Serial.print(sepicData.dutyCycle);
         Serial.print(F("\r\n"));
-        vTaskDelay(100);
+        vTaskDelay(1000);
     }
 }
 
@@ -305,16 +343,21 @@ void vStairSetpointTask(void *pvParameters)
 {
     UNUSED(pvParameters);
     sepicData.setPoint = 20;
+    Serial.println(F("Stair Setpoint Task Started"));
+    int tick = 0;
     while (1)
     {
+        // Serial.println(F("Stair Setpoint Task looped"));
         sepicData.setPoint += 5;
         if (sepicData.setPoint > 50) // Reset if setpoint exceeds 100
         {
             sepicData.setPoint = 20;
         }
-        vTaskDelay(5000 / portTICK_PERIOD_MS); // Delay for 5 seconds
+        // vTaskDelay(10); // Delay for 5 seconds
+        vTaskDelay(5000); // Delay for 5 seconds
     }
 }
+double actual;
 void vPIDTask(void *pvParameters)
 {
     UNUSED(pvParameters);
@@ -322,13 +365,20 @@ void vPIDTask(void *pvParameters)
     ki = 4;
     kd = 0.01;
     last_time = 0;
+    Serial.println(F("PID Task Started"));
     while (1)
     {
         double now = millis();
         dt = (now - last_time) / 1000.00;
         last_time = now;
 
-        double actual = LPFv(sepicData.voltageOutput);
+        // double actual = LPFv(sepicData.voltageOutput);
+        if (xQueueReceive(QueueVout, &sepicData.voltageOutput, portMAX_DELAY) == pdPASS)
+        {
+            actual = LPFv(sepicData.voltageOutput);
+            // Serial.print("Received value ");
+            // Serial.println(receivedValue);
+        }
         double error = sepicData.setPoint - actual;
         output = pid(error);
         setDuty(output);
@@ -339,7 +389,7 @@ void vPIDTask(void *pvParameters)
         Serial.print(actual);
         Serial.print(F("\r\n"));
 
-        delay(10);
+        vTaskDelay(5); // Delay for 1 second
     }
 }
 
